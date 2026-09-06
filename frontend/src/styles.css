@@ -1,0 +1,130 @@
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+
+.war-room {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #0b0e14;
+  color: #e6e9f0;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 24px;
+  background: #10141d;
+  border-bottom: 1px solid #1e2532;
+}
+
+.brand-mark {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #ff3b3b;
+  margin-right: 12px;
+}
+
+.brand-sub {
+  font-size: 13px;
+  color: #8891a5;
+}
+
+.actions button {
+  background: #1a2130;
+  color: #e6e9f0;
+  border: 1px solid #2a3346;
+  padding: 8px 14px;
+  margin-left: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.actions button:hover { background: #232c40; }
+
+.error-banner, .loading-banner {
+  padding: 8px 24px;
+  font-size: 13px;
+}
+.error-banner { background: #3a1414; color: #ff8a8a; }
+.loading-banner { background: #14203a; color: #8ab4ff; }
+
+.body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.graph-panel {
+  flex: 1;
+  position: relative;
+}
+
+.scrubber {
+  position: absolute;
+  bottom: 16px;
+  left: 24px;
+  right: 24px;
+  background: rgba(16, 20, 29, 0.85);
+  border: 1px solid #1e2532;
+  border-radius: 8px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #8891a5;
+}
+.scrubber input[type="range"] { flex: 1; }
+
+.side-panel {
+  width: 380px;
+  border-left: 1px solid #1e2532;
+  background: #10141d;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.side-panel h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #8891a5;
+  margin-bottom: 10px;
+}
+
+.ring-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+
+.ring-card {
+  background: #161c29;
+  border: 1px solid #232c40;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.ring-card:hover { border-color: #ff9f1c; }
+.ring-card.active { border-color: #ff3b3b; }
+
+.ring-title { font-weight: 600; font-size: 13px; }
+.ring-meta { font-size: 11px; color: #8891a5; margin-top: 4px; }
+
+.case-file, .explain-box {
+  background: #161c29;
+  border: 1px solid #232c40;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.case-file h4, .explain-box h4 { margin: 0 0 8px 0; font-size: 14px; }
+
+.trace-list { margin-top: 8px; border-top: 1px solid #232c40; padding-top: 8px; }
+.trace-hop { font-size: 12px; color: #b9c2d6; padding: 2px 0; }
+
+.explanation-text { color: #e6e9f0; line-height: 1.5; }
+
+.muted { color: #6b7488; font-size: 12px; }
+
+section { margin-bottom: 24px; }
