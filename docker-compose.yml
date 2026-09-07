@@ -2,32 +2,6 @@ version: "3.8"
 
 services:
   # ------------------------------------------------------------------
-  # Exasol Personal Edition — the active computational core of AEGIS.
-  # All velocity features & multi-hop ring tracing run as SQL views
-  # inside this engine, not in pandas.
-  # ------------------------------------------------------------------
-  exasol:
-    image: exasol/docker-db:latest
-    container_name: aegis-exasol
-    privileged: true
-    ports:
-      - "8563:8563"     # SQL client port
-      - "6583:6583"     # BucketFS / admin
-      - "2580:2580"     # EXAoperation UI
-    environment:
-      - CLUSTERNAME=aegis
-    volumes:
-      - exasol_data:/exa
-    healthcheck:
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8563"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
-      start_period: 90s
-    networks:
-      - aegis-net
-
-  # ------------------------------------------------------------------
   # FastAPI backend — GPU-enabled for XGBoost / GNN training & scoring.
   # ------------------------------------------------------------------
   backend:
@@ -35,15 +9,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aegis-backend
-    depends_on:
-      exasol:
-        condition: service_healthy
+    env_file: .env
     environment:
-      - EXASOL_HOST=exasol
-      - EXASOL_PORT=8563
-      - EXASOL_USER=sys
-      - EXASOL_PASSWORD=exasol
-      - EXASOL_SCHEMA=AEGIS
       - PYTHONUNBUFFERED=1
     ports:
       - "8000:8000"
@@ -83,6 +50,3 @@ services:
 networks:
   aegis-net:
     driver: bridge
-
-volumes:
-  exasol_data:

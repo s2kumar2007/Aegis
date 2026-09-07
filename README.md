@@ -19,7 +19,7 @@ flowchart LR
         GEN[generate_data.py<br/>normal txns + planted rings]
     end
 
-    subgraph Exasol[Exasol Personal — computational core]
+    subgraph Exasol[Exasol Personal — AWS/Azure, computational core]
         T1[(accounts)]
         T2[(transactions)]
         T3[(fraud_labels)]
@@ -92,6 +92,9 @@ Toolkit) is optional — everything falls back to CPU automatically.
 
 ```bash
 git clone <this-repo> aegis && cd aegis
+# First, deploy Exasol Personal via the Launcher CLI (exasol install aws/azure/local)
+cp .env.example .env
+# Edit .env and fill in real values from `exasol info`
 docker compose up -d
 ./run_demo.sh          # waits for services, seeds Exasol, runs the pipeline
 ```

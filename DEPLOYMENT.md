@@ -1,29 +1,24 @@
 # Deployment Guide
 
-## Running Exasol Personal locally (what `docker-compose.yml` does)
+## Deploying Exasol Personal
 
-Exasol Personal Edition ships as a single-node Docker image
-(`exasol/docker-db`). Key points for local/demo use:
+The hackathon mandates the real Exasol Personal edition, deployed via Exasol's Launcher CLI (not a local Docker container).
 
-- **Resources**: give Docker at least 4 CPU cores and 8GB RAM headroom;
-  Exasol itself wants ~4-6GB. On a laptop, close other heavy containers
-  first.
-- **Privileged mode**: the official image requires `privileged: true`
-  (it manages its own virtual block devices internally) — already set in
-  `docker-compose.yml`.
-- **First boot time**: allow 60-90 seconds after the container reports
-  "healthy" before the SQL port actually accepts queries — `run_demo.sh`
-  and `simulation/exasol_conn.py` both retry with backoff to absorb this.
-- **Default credentials**: `sys` / `exasol` (set via `EXASOL_USER` /
-  `EXASOL_PASSWORD` env vars in `docker-compose.yml`; change these for
-  anything beyond a local demo).
-- **Persistence**: the `exasol_data` named volume persists data across
-  `docker compose down` / `up`. Use `docker compose down -v` to fully
-  reset and re-seed.
-- **EXAoperation UI**: reachable at `http://localhost:2580` if you want to
-  inspect the cluster/database state visually.
-- **Client access**: any Exasol-compatible SQL client (DBeaver, DataGrip,
-  `pyexasol`) can connect to `localhost:8563` with the credentials above.
+To deploy Exasol Personal outside this repo:
+
+```bash
+curl https://downloads.exasol.com/exasol-personal/installer.sh | sh
+mkdir deployment && cd deployment
+# Choose your target: aws, azure, or local (macOS)
+exasol install local
+# Get your connection details:
+exasol info
+```
+
+Once deployed, point this repository to your Exasol instance:
+1. Copy `.env.example` to `.env` in the repo root.
+2. Fill in the `EXASOL_HOST`, `EXASOL_PORT`, `EXASOL_USER`, and `EXASOL_PASSWORD` values provided by `exasol info`.
+3. You can also connect directly to the database using `exasol connect`.
 
 ### Manually re-applying the SQL layer
 
@@ -40,20 +35,9 @@ docker exec -it aegis-backend python -c \
 
 ## Cloud deployment notes (AWS / Azure)
 
-Exasol Personal Edition is licensed and sized for local/dev use (single
-node, capped data volume) — it is **not** the artifact you'd lift-and-shift
-to production. For a cloud deployment, two paths:
+Exasol Personal Edition is deployed via the Launcher CLI (e.g. `exasol install aws` or `exasol install azure`). It is **not** deployed via docker-compose.
 
-### Option A — keep Exasol containerized on a VM
-- Provision a VM with enough RAM (`AWS`: e.g. `r6i.xlarge`+/ `Azure`:
-  `E4s_v5`+) and run the same `docker-compose.yml` there.
-- Put the FastAPI backend and Exasol on the same private subnet/VNet;
-  only expose the frontend (and optionally the API) behind a load
-  balancer / reverse proxy with TLS.
-- This preserves the exact demo architecture — good for a hosted hackathon
-  demo, not for real production fraud-detection volume.
-
-### Option B — Exasol's managed offering for real workloads
+### Exasol's managed offering for real workloads
 - For genuine production scale, Exasol offers managed deployments
   (Exasol SaaS / on cloud marketplaces) sized for multi-node clusters.
   Swap the `EXASOL_HOST`/port/credentials env vars to point the backend
@@ -62,7 +46,7 @@ to production. For a cloud deployment, two paths:
 
 ### Regardless of option
 - Put secrets (`EXASOL_PASSWORD`, etc.) in a secrets manager (AWS Secrets
-  Manager / Azure Key Vault), not in `docker-compose.yml`, for anything
+  Manager / Azure Key Vault), not in `.env`, for anything
   beyond local demo use.
 - The FastAPI backend is stateless aside from the small in-memory replay
   cursor — safe to run multiple replicas behind a load balancer if needed;
