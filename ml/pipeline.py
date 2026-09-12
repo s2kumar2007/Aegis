@@ -52,7 +52,7 @@ def run_pipeline(flag_threshold: float = 0.5) -> pd.DataFrame:
         ring_scores = pd.DataFrame(columns=["account_id", "ring_membership_score"])
 
     # --- 2. baseline (mandatory) — GNN score stacked as feature -----------------
-    baseline_scores = baseline_classifier.run(ring_scores)
+    baseline_scores, xgb_model, feature_df = baseline_classifier.run(ring_scores)
 
     merged = baseline_scores.merge(ring_scores, on="account_id", how="left").fillna(0)
     if "ring_membership_score" not in merged.columns:
@@ -146,16 +146,79 @@ def run_pipeline(flag_threshold: float = 0.5) -> pd.DataFrame:
 
     merged = merged.merge(feat_agg, on="account_id", how="left")
 
-    # --- 6. Bayesian explainability (best-effort) --------------------------------
+    # --- 6. SHAP & Bayesian explainability ---------------------------------------
+    print("[pipeline] Computing SHAP values for explanations...")
+    try:
+        import shap
+        import numpy as np
+        
+        # We find the highest-risk transaction for each account to explain
+        X_all = feature_df[baseline_classifier.FEATURE_COLS].fillna(0)
+        feature_df["temp_txn_score"] = xgb_model.predict_proba(X_all)[:, 1]
+        idx_max = feature_df.groupby("account_id")["temp_txn_score"].idxmax()
+        max_risk_txns = feature_df.loc[idx_max].copy()
+        
+        X_max = max_risk_txns[baseline_classifier.FEATURE_COLS].fillna(0)
+        
+        explainer = shap.TreeExplainer(xgb_model)
+        # Handle XGBoost's TreeExplainer output (sometimes returns list for multi-class/binary, sometimes array)
+        shap_vals = explainer.shap_values(X_max)
+        if isinstance(shap_vals, list):
+            shap_vals = shap_vals[1]  # positive class
+            
+        feature_names = baseline_classifier.FEATURE_COLS
+        name_map = {
+            "txn_count_1h": "unusual transaction velocity",
+            "txn_sum_1h": "high hourly transaction volume",
+            "amount_deviation_score": "highly anomalous transaction amount",
+            "amount_zscore": "highly anomalous transaction amount",
+            "distinct_receivers_1h": "fan-out to multiple receivers",
+            "distinct_senders_1h": "fan-in from multiple senders",
+            "velocity_acceleration": "sudden spike in transaction velocity",
+            "ring_membership_score": "connection to a known fraud ring",
+            "time_since_last_txn": "unusual timing since last transaction",
+            "device_ip_reuse_count": "device or IP address reuse",
+            "is_odd_hour": "transaction during unusual hours"
+        }
+        
+        shap_exps = []
+        for i in range(len(max_risk_txns)):
+            acc_id = max_risk_txns.iloc[i]["account_id"]
+            sv = shap_vals[i]
+            # Top 2 features by absolute contribution
+            top_indices = np.argsort(np.abs(sv))[-2:][::-1]
+            
+            reasons = []
+            for idx in top_indices:
+                fname = feature_names[idx]
+                friendly = name_map.get(fname, fname.replace("_", " "))
+                reasons.append(f"{friendly} (contribution: {sv[idx]:.2f})")
+                
+            expl_str = "Flagged due to " + " and ".join(reasons)
+            shap_exps.append({"account_id": acc_id, "shap_explanation": expl_str})
+            
+        shap_df = pd.DataFrame(shap_exps)
+        merged = merged.merge(shap_df, on="account_id", how="left")
+    except Exception as e:
+        print(f"[pipeline] SHAP explanation failed: {e}")
+        traceback.print_exc()
+        merged["shap_explanation"] = ""
+
     try:
         rows = merged.to_dict(orient="records")
         explanations = explainability.explain_accounts(rows)
         exp_df = pd.DataFrame(explanations)
         merged = merged.merge(exp_df, on="account_id", how="left")
+        
+        # Replace generic explanation with SHAP explanation if available
+        merged["explanation"] = merged.apply(
+            lambda r: r["shap_explanation"] if pd.notna(r.get("shap_explanation")) and r.get("shap_explanation") != "" else r.get("explanation", "Explanation unavailable."),
+            axis=1
+        )
     except Exception:
         print("[pipeline] explainability failed, defaulting to generic message:")
         traceback.print_exc()
-        merged["explanation"] = "Explanation unavailable (Bayesian layer error)."
+        merged["explanation"] = merged.get("shap_explanation", "Explanation unavailable (Bayesian layer error).")
         merged["risk_level"] = merged["model_score"].apply(
             lambda s: "high" if s >= flag_threshold else "low"
         )

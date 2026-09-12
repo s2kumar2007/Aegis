@@ -140,15 +140,15 @@ def score_accounts(model, df: pd.DataFrame) -> pd.DataFrame:
     return account_scores
 
 
-def run(ring_scores: pd.DataFrame = None) -> pd.DataFrame:
+def run(ring_scores: pd.DataFrame = None):
     df = build_training_frame(ring_scores)
     if df.empty:
         raise RuntimeError("account_velocity_view returned no rows — run generate_data.py first")
     model = train_model(df)
     scores = score_accounts(model, df)
-    return scores
+    return scores, model, df
 
 
 if __name__ == "__main__":
-    scores = run()
+    scores, model, df = run()
     print(scores.sort_values("model_score", ascending=False).head(20))
