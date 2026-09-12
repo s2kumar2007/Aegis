@@ -55,9 +55,9 @@ def get_accounts(limit: int = Query(500, le=5000)):
 def get_transactions(since: Optional[str] = None, limit: int = Query(2000, le=20000)):
     conn = get_connection()
     if since:
+        safe_since = since.replace("'", "''")
         df = conn.export_to_pandas(
-            "SELECT * FROM transactions WHERE txn_timestamp >= :since ORDER BY txn_timestamp LIMIT " + str(limit),
-            {"since": since},
+            f"SELECT * FROM transactions WHERE txn_timestamp >= '{safe_since}' ORDER BY txn_timestamp LIMIT {limit}"
         )
     else:
         df = conn.export_to_pandas(f"SELECT * FROM transactions ORDER BY txn_timestamp LIMIT {limit}")
@@ -69,13 +69,11 @@ def get_transactions(since: Optional[str] = None, limit: int = Query(2000, le=20
 def get_risk_scores(min_score: float = 0.0, limit: int = Query(1000, le=10000)):
     conn = get_connection()
     df = conn.export_to_pandas(
-        "SELECT * FROM risk_scores WHERE model_score >= :min_score "
-        "ORDER BY model_score DESC LIMIT " + str(limit),
-        {"min_score": min_score},
+        f"SELECT * FROM risk_scores WHERE model_score >= {min_score} "
+        f"ORDER BY model_score DESC LIMIT {limit}"
     )
     conn.close()
     return df_to_records(df)
-
 
 @app.get("/rings")
 def get_rings(limit: int = Query(50, le=500)):
@@ -90,9 +88,9 @@ def get_rings(limit: int = Query(50, le=500)):
 def get_ring_trace(root_account_id: str):
     """Full hop-by-hop path for one ring's case-file panel."""
     conn = get_connection()
+    safe_root_id = root_account_id.replace("'", "''")
     df = conn.export_to_pandas(
-        "SELECT * FROM ring_trace_view WHERE root_account_id = :rid ORDER BY hop_no",
-        {"rid": root_account_id},
+        f"SELECT * FROM ring_trace_view WHERE root_account_id = '{safe_root_id}' ORDER BY hop_no"
     )
     conn.close()
     if df.empty:
@@ -103,8 +101,9 @@ def get_ring_trace(root_account_id: str):
 @app.get("/explain/{account_id}")
 def explain_account(account_id: str):
     conn = get_connection()
+    safe_id = account_id.replace("'", "''")
     df = conn.export_to_pandas(
-        "SELECT * FROM risk_scores WHERE account_id = :aid", {"aid": account_id}
+        f"SELECT * FROM risk_scores WHERE account_id = '{safe_id}'"
     )
     conn.close()
     if df.empty:
@@ -143,11 +142,12 @@ def timeline_state(t: str = Query(..., description="ISO timestamp to snapshot th
     rings) as of simulated time `t`, for the time-scrubber.
     """
     conn = get_connection()
+    safe_t = str(t).replace("'", "''")
     txns = conn.export_to_pandas(
-        "SELECT * FROM transactions WHERE txn_timestamp <= :t ORDER BY txn_timestamp", {"t": t}
+        f"SELECT * FROM transactions WHERE txn_timestamp <= '{safe_t}' ORDER BY txn_timestamp"
     )
     rings = conn.export_to_pandas(
-        "SELECT * FROM ring_summary_view WHERE chain_start <= :t", {"t": t}
+        f"SELECT * FROM ring_summary_view WHERE chain_start <= '{safe_t}'"
     )
     conn.close()
     return {

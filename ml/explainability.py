@@ -16,7 +16,7 @@ For every flagged account we discretize its actual feature values into
 these bins, run inference, and turn the result into a plain-language
 explanation string that's stored in risk_scores.explanation.
 """
-from pgmpy.models import DiscreteBayesianNetwork
+from pgmpy.models import BayesianNetwork as DiscreteBayesianNetwork
 from pgmpy.factors.discrete import TabularCPD
 from pgmpy.inference import VariableElimination
 

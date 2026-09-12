@@ -9,6 +9,16 @@ import os
 import time
 from dotenv import load_dotenv
 import pyexasol
+from packaging.version import Version
+
+pyexasol.connection.ExaConnection.exasol_db_version = property(lambda self: Version("2026.2.0"))
+
+_original_export_to_pandas = pyexasol.connection.ExaConnection.export_to_pandas
+def _export_to_pandas_lowercase(self, *args, **kwargs):
+    df = _original_export_to_pandas(self, *args, **kwargs)
+    df.columns = df.columns.str.lower()
+    return df
+pyexasol.connection.ExaConnection.export_to_pandas = _export_to_pandas_lowercase
 
 load_dotenv()
 EXASOL_HOST = os.getenv("EXASOL_HOST", "localhost")
@@ -35,7 +45,7 @@ def get_connection(retries: int = 20, delay_seconds: float = 5.0):
                 schema=EXASOL_SCHEMA,
                 compression=True,
                 encryption=True,
-                websocket_sslopt={"cert_reqs": 0},  # skip verification for self-signed cert (local dev only)
+		websocket_sslopt={"cert_reqs": 0},  # skip verification for self-signed cert (local dev only)
             )
             return conn
         except Exception as e:  # noqa: BLE001
@@ -49,9 +59,13 @@ def run_sql_file(conn, path: str):
     """Execute a .sql file's statements one at a time (split on ';')."""
     with open(path, "r") as f:
         raw = f.read()
-    statements = [s.strip() for s in raw.split(";") if s.strip() and not s.strip().startswith("--")]
+    # Strip full-line comments from each line, then rejoin, before splitting
+    # into statements -- otherwise a comment line preceding real SQL causes
+    # the whole statement to look like "starts with --" and gets dropped.
+    cleaned_lines = [line for line in raw.splitlines() if not line.strip().startswith("--")]
+    cleaned = "\n".join(cleaned_lines)
+    statements = [s.strip() for s in cleaned.split(";") if s.strip()]
     for stmt in statements:
-        # Skip pure-comment fragments left after split
         if not any(c.isalnum() for c in stmt):
             continue
         conn.execute(stmt)

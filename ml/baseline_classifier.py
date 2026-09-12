@@ -26,7 +26,7 @@ FEATURE_COLS = [
     "time_since_first_txn", "amount_vs_running_avg_ratio", "velocity_acceleration",
     "ring_membership_score",
     # newly added features
-    "time_since_last_txn", "device_ip_reuse_count", "amount_zscore",
+    "time_since_last_txn", "amount_zscore",
     "txn_hour_of_day", "is_odd_hour"
 ]
 

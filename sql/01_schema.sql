@@ -52,6 +52,7 @@ CREATE OR REPLACE TABLE risk_scores (
     account_id           VARCHAR(64)   NOT NULL,
     model_score           DOUBLE,        -- baseline XGBoost probability
     ring_membership_score DOUBLE,        -- GNN / community-detection score
+    anomaly_score          DOUBLE,        -- autoencoder reconstruction-error score
     explanation           VARCHAR(2000), -- plain-language Bayesian explanation
     flagged_at             TIMESTAMP,
     PRIMARY KEY (account_id)
