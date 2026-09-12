@@ -58,6 +58,48 @@ def run_pipeline(flag_threshold: float = 0.5) -> pd.DataFrame:
     if "ring_membership_score" not in merged.columns:
         merged["ring_membership_score"] = 0.0
 
+    # --- 2.5 Stacking Meta-Model -------------------------------------------------
+    print("[pipeline] Fitting logistic regression stacker...")
+    try:
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.model_selection import train_test_split
+        
+        conn = get_connection()
+        label_sql = """
+        SELECT DISTINCT account_id, 1 as is_fraud FROM (
+            SELECT t.sender_id AS account_id FROM transactions t JOIN fraud_labels fl ON t.txn_id = fl.txn_id
+            UNION
+            SELECT t.receiver_id AS account_id FROM transactions t JOIN fraud_labels fl ON t.txn_id = fl.txn_id
+        )
+        """
+        labels_df = conn.export_to_pandas(label_sql)
+        conn.close()
+        
+        merged_stack = merged.merge(labels_df, on="account_id", how="left")
+        merged_stack["is_fraud"] = merged_stack["is_fraud"].fillna(0).astype(int)
+        
+        X_stack = merged_stack[["model_score", "ring_membership_score"]]
+        y_stack = merged_stack["is_fraud"]
+        
+        # Train/Validation split
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_stack, y_stack, test_size=0.2, random_state=42, stratify=y_stack if y_stack.sum() > 1 else None
+        )
+        
+        stacker = LogisticRegression(class_weight="balanced")
+        stacker.fit(X_train, y_train)
+        
+        print("\n[pipeline] Stacker Learned Weights:")
+        print(f"  model_score weight:           {stacker.coef_[0][0]:.4f}")
+        print(f"  ring_membership_score weight: {stacker.coef_[0][1]:.4f}")
+        print(f"  Intercept:                    {stacker.intercept_[0]:.4f}\n")
+        
+        # Replace the final combined risk score with the stacker's output
+        merged["model_score"] = stacker.predict_proba(X_stack)[:, 1]
+    except Exception as e:
+        print(f"[pipeline] Stacking failed: {e}")
+        traceback.print_exc()
+
     # --- 3. confidence calibration (best-effort) ---------------------------------
     if _HAS_CALIBRATION:
         try:
