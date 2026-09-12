@@ -24,7 +24,10 @@ FEATURE_COLS = [
     "avg_amount_30d", "stddev_amount_30d", "amount_deviation_score",
     "distinct_receivers_1h", "in_txn_count_1h", "distinct_senders_1h",
     "time_since_first_txn", "amount_vs_running_avg_ratio", "velocity_acceleration",
-    "ring_membership_score"
+    "ring_membership_score",
+    # newly added features
+    "time_since_last_txn", "device_ip_reuse_count", "amount_zscore",
+    "txn_hour_of_day", "is_odd_hour"
 ]
 
 

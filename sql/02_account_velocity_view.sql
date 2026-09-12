@@ -77,7 +77,29 @@ WITH outbound AS (
             PARTITION BY t.sender_id
             ORDER BY t.txn_timestamp
             RANGE UNBOUNDED PRECEDING
-        )                                              AS first_txn_ts
+        )                                              AS first_txn_ts,
+        
+        -- NEW FEATURE 1: time since last transaction
+        SECONDS_BETWEEN(
+            t.txn_timestamp,
+            LAG(t.txn_timestamp) OVER (
+                PARTITION BY t.sender_id
+                ORDER BY t.txn_timestamp
+            )
+        )                                              AS time_since_last_txn,
+        
+        -- NEW FEATURE 2: device/IP reuse count 
+        -- Note: Assumes device_id / ip_address columns are added to transactions
+        COUNT(DISTINCT t.sender_id) OVER (
+            PARTITION BY COALESCE(t.device_id, t.ip_address)
+        )                                              AS device_ip_reuse_count,
+
+        -- NEW FEATURE 4: hour of day and odd hour flag
+        EXTRACT(HOUR FROM t.txn_timestamp)             AS txn_hour_of_day,
+        CASE
+            WHEN EXTRACT(HOUR FROM t.txn_timestamp) BETWEEN 1 AND 5 THEN 1
+            ELSE 0
+        END                                            AS is_odd_hour
 
     FROM transactions t
 ),
@@ -108,11 +130,19 @@ SELECT
     o.txn_sum_24h,
     o.avg_amount_30d,
     o.stddev_amount_30d,
-    -- z-score style deviation of this txn amount from the account's own 30d baseline
+    
+    -- Original deviation score
     CASE
         WHEN o.stddev_amount_30d IS NULL OR o.stddev_amount_30d = 0 THEN 0
         ELSE (o.amount - o.avg_amount_30d) / o.stddev_amount_30d
     END                                                AS amount_deviation_score,
+    
+    -- NEW FEATURE 3: amount z-score (alias for standard deviation score)
+    CASE
+        WHEN o.stddev_amount_30d IS NULL OR o.stddev_amount_30d = 0 THEN 0
+        ELSE (o.amount - o.avg_amount_30d) / o.stddev_amount_30d
+    END                                                AS amount_zscore,
+    
     o.distinct_receivers_1h,
     COALESCE(i.in_txn_count_1h, 0)                     AS in_txn_count_1h,
     COALESCE(i.distinct_senders_1h, 0)                 AS distinct_senders_1h,
@@ -122,7 +152,13 @@ SELECT
         WHEN o.avg_amount_30d IS NULL OR o.avg_amount_30d = 0 THEN 0
         ELSE o.amount / o.avg_amount_30d
     END                                                AS amount_vs_running_avg_ratio,
-    (o.txn_count_1h - o.txn_count_prior_1h)            AS velocity_acceleration
+    (o.txn_count_1h - o.txn_count_prior_1h)            AS velocity_acceleration,
+    
+    -- Expose new features
+    COALESCE(o.time_since_last_txn, 0)                 AS time_since_last_txn,
+    o.device_ip_reuse_count,
+    o.txn_hour_of_day,
+    o.is_odd_hour
 
 FROM outbound o
 LEFT JOIN inbound i
