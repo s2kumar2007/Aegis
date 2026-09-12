@@ -27,6 +27,7 @@ def build_network() -> DiscreteBayesianNetwork:
         ("account_age", "fraud_risk"),
         ("ring_membership", "fraud_risk"),
         ("amount_deviation", "fraud_risk"),
+        ("anomaly_signal", "fraud_risk"),   # Step 5: autoencoder anomaly node
     ])
 
     cpd_velocity = TabularCPD("transaction_velocity", 3, [[0.7], [0.2], [0.1]],
@@ -37,25 +38,26 @@ def build_network() -> DiscreteBayesianNetwork:
                            state_names={"ring_membership": ["no", "yes"]})
     cpd_deviation = TabularCPD("amount_deviation", 2, [[0.85], [0.15]],
                                 state_names={"amount_deviation": ["normal", "high"]})
+    cpd_anomaly = TabularCPD("anomaly_signal", 2, [[0.85], [0.15]],
+                              state_names={"anomaly_signal": ["normal", "high"]})
 
-    # fraud_risk | velocity(3) x age(2) x ring(2) x deviation(2) = 24 combos
-    # Encode a hand-tuned prior: each risk factor independently pushes the
-    # probability of fraud_risk upward; combinations compound.
+    # fraud_risk | velocity(3) x age(2) x ring(2) x deviation(2) x anomaly(2) = 48 combos
     states_velocity = ["low", "med", "high"]
     states_age = ["established", "new"]
     states_ring = ["no", "yes"]
     states_dev = ["normal", "high"]
+    states_anomaly = ["normal", "high"]
 
-    def risk_weights(v, a, r, d):
+    def risk_weights(v, a, r, d, an):
         score = 0.0
         score += {"low": 0.0, "med": 0.35, "high": 0.7}[v]
         score += {"established": 0.0, "new": 0.25}[a]
         score += {"no": 0.0, "yes": 0.6}[r]
         score += {"normal": 0.0, "high": 0.3}[d]
-        score = min(score, 1.4)
-        # map combined score -> P(low, med, high)
-        p_high = min(0.95, score / 1.4 * 0.9)
-        p_low = max(0.02, 1 - score / 1.4) * 0.6
+        score += {"normal": 0.0, "high": 0.4}[an]   # anomaly adds up to 0.4
+        score = min(score, 1.8)
+        p_high = min(0.95, score / 1.8 * 0.9)
+        p_low = max(0.02, 1 - score / 1.8) * 0.6
         p_med = max(0.03, 1 - p_high - p_low)
         total = p_low + p_med + p_high
         return [p_low / total, p_med / total, p_high / total]
@@ -65,25 +67,28 @@ def build_network() -> DiscreteBayesianNetwork:
         for a in states_age:
             for r in states_ring:
                 for d in states_dev:
-                    columns.append(risk_weights(v, a, r, d))
+                    for an in states_anomaly:
+                        columns.append(risk_weights(v, a, r, d, an))
 
-    # TabularCPD wants values as rows=states of fraud_risk, cols=combos
-    values = list(zip(*columns))  # transpose -> 3 rows x 24 cols
+    # TabularCPD: rows = states of fraud_risk, cols = parent combos
+    values = list(zip(*columns))  # transpose -> 3 rows x 48 cols
 
     cpd_fraud = TabularCPD(
         "fraud_risk", 3, list(map(list, values)),
-        evidence=["transaction_velocity", "account_age", "ring_membership", "amount_deviation"],
-        evidence_card=[3, 2, 2, 2],
+        evidence=["transaction_velocity", "account_age", "ring_membership",
+                  "amount_deviation", "anomaly_signal"],
+        evidence_card=[3, 2, 2, 2, 2],
         state_names={
             "fraud_risk": ["low", "med", "high"],
             "transaction_velocity": states_velocity,
             "account_age": states_age,
             "ring_membership": states_ring,
             "amount_deviation": states_dev,
+            "anomaly_signal": states_anomaly,
         },
     )
 
-    model.add_cpds(cpd_velocity, cpd_age, cpd_ring, cpd_deviation, cpd_fraud)
+    model.add_cpds(cpd_velocity, cpd_age, cpd_ring, cpd_deviation, cpd_anomaly, cpd_fraud)
     assert model.check_model()
     return model
 
@@ -108,11 +113,16 @@ def discretize(row: dict) -> dict:
     deviation = row.get("amount_deviation_score", 0.0) or 0.0
     dev = "high" if abs(deviation) >= 2.0 else "normal"
 
+    # anomaly_score from autoencoder (Step 5); defaults to 0.0 if absent
+    anomaly = row.get("anomaly_score", 0.0) or 0.0
+    anomaly_signal = "high" if anomaly >= 0.6 else "normal"
+
     return {
         "transaction_velocity": velocity,
         "account_age": age,
         "ring_membership": ring,
         "amount_deviation": dev,
+        "anomaly_signal": anomaly_signal,
     }
 
 
@@ -131,6 +141,8 @@ def explain(model, infer: VariableElimination, row: dict) -> tuple[str, str]:
         reasons.append("membership in a suspected ring")
     if evidence["amount_deviation"] == "high":
         reasons.append("an amount far outside this account's normal pattern")
+    if evidence["anomaly_signal"] == "high":
+        reasons.append("an anomalous behavioural signature (autoencoder)")
 
     if not reasons:
         explanation = "No significant risk factors detected; account behaviour is within normal bounds."

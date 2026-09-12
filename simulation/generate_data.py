@@ -88,9 +88,9 @@ def gen_normal_transactions(accounts: list, n_txns: int, txn_counter: list):
 def plant_smurfing_ring(ring_no: int, txn_counter: list, base_time: datetime):
     """One source splits a large sum into many small transfers to fresh smurf accounts."""
     ring_id = f"RING_SMURF_{ring_no:03d}"
-    source = make_account(_id("MULE", 9000 + ring_no * 10), random.randint(5, 40), kyc_tier="minimal")
-    n_smurfs = random.randint(8, 15)
-    smurfs = [make_account(_id("MULE", 9001 + ring_no * 10 + i), random.randint(1, 15), kyc_tier="none")
+    source = make_account(_id("MULE", 10000 + ring_no * 100), random.randint(5, 40), kyc_tier="minimal")
+    n_smurfs = random.randint(5, 25)
+    smurfs = [make_account(_id("MULE", 10001 + ring_no * 100 + i), random.randint(1, 15), kyc_tier="none")
               for i in range(n_smurfs)]
     total = random.uniform(150000, 400000)
     per_txn = total / n_smurfs
@@ -117,8 +117,8 @@ def plant_smurfing_ring(ring_no: int, txn_counter: list, base_time: datetime):
 def plant_layering_chain(ring_no: int, txn_counter: list, base_time: datetime):
     """Funds routed through 3-5 mule accounts, shrinking slightly each hop (cash-out fee)."""
     ring_id = f"RING_LAYER_{ring_no:03d}"
-    chain_len = random.randint(4, 6)  # A -> ... -> chain_len accounts total, 3-5 hops
-    chain_accounts = [make_account(_id("MULE", 9500 + ring_no * 10 + i), random.randint(2, 20), kyc_tier="minimal")
+    chain_len = random.randint(3, 8)  # A -> ... -> chain_len accounts total, 2-7 hops
+    chain_accounts = [make_account(_id("MULE", 20000 + ring_no * 100 + i), random.randint(2, 20), kyc_tier="minimal")
                        for i in range(chain_len)]
     amount = random.uniform(80000, 250000)
     ts = base_time
@@ -144,11 +144,11 @@ def plant_layering_chain(ring_no: int, txn_counter: list, base_time: datetime):
 def plant_mule_fan(ring_no: int, txn_counter: list, base_time: datetime):
     """Fan-in/fan-out: many senders -> one mule hub -> many receivers."""
     ring_id = f"RING_MULE_{ring_no:03d}"
-    hub = make_account(_id("MULE", 9800 + ring_no * 10), random.randint(3, 25), kyc_tier="minimal")
-    n_in = random.randint(5, 10)
-    n_out = random.randint(5, 10)
-    senders = [make_account(_id("MULE", 9801 + ring_no * 10 + i), random.randint(30, 500)) for i in range(n_in)]
-    receivers = [make_account(_id("MULE", 9850 + ring_no * 10 + i), random.randint(1, 10), kyc_tier="none")
+    hub = make_account(_id("MULE", 30000 + ring_no * 1000), random.randint(3, 25), kyc_tier="minimal")
+    n_in = random.randint(3, 15)
+    n_out = random.randint(3, 15)
+    senders = [make_account(_id("MULE", 30001 + ring_no * 1000 + i), random.randint(30, 500)) for i in range(n_in)]
+    receivers = [make_account(_id("MULE", 30500 + ring_no * 1000 + i), random.randint(1, 10), kyc_tier="none")
                  for i in range(n_out)]
 
     accounts = [hub] + senders + receivers
@@ -181,8 +181,8 @@ def plant_mule_fan(ring_no: int, txn_counter: list, base_time: datetime):
     return accounts, txns, labels
 
 
-def build_dataset(n_normal_accounts=1200, n_normal_txns=9000,
-                   n_smurf_rings=4, n_layer_rings=4, n_mule_rings=3):
+def build_dataset(n_normal_accounts=4500, n_normal_txns=50000,
+                   n_smurf_rings=15, n_layer_rings=15, n_mule_rings=10):
     txn_counter = [1]
     all_accounts = gen_normal_population(n_normal_accounts)
     all_txns = gen_normal_transactions(all_accounts, n_normal_txns, txn_counter)

@@ -27,6 +27,12 @@ import pandas as pd
 sys.path.append("/app/simulation")
 from exasol_conn import get_connection  # noqa: E402
 
+try:
+    import calibration as _calibration
+    _HAS_CALIBRATION = True
+except Exception:  # noqa: BLE001
+    _HAS_CALIBRATION = False
+
 DEFAULT_THRESHOLD = 0.5
 
 
@@ -109,6 +115,31 @@ def run_adaptation_cycle(candidate_ring_ids: list[str] | None = None):
                         "new_threshold": new_threshold, "new_txns": len(txns_df)})
 
     conn.close()
+
+    # Refit calibrators on the updated data so the next /pipeline/run uses
+    # fresh isotonic calibration without being a blocking call every time.
+    if _HAS_CALIBRATION and events:
+        try:
+            import baseline_classifier
+            import gnn_ring_scorer
+            print("[adaptive_loop] refitting calibrators post-adaptation...")
+            ring_scores = gnn_ring_scorer.run()
+            df = baseline_classifier.build_training_frame(ring_scores)
+            if not df.empty and "is_planted" in df.columns:
+                df_acct = (
+                    df.groupby("account_id")
+                    .agg(
+                        model_score_raw=("is_planted", "max"),
+                        ring_membership_score=("ring_membership_score", "max"),
+                        is_planted=("is_planted", "max"),
+                    )
+                    .reset_index()
+                )
+                df_acct = df_acct.rename(columns={"model_score_raw": "model_score"})
+                _calibration.fit_all(df_acct)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[adaptive_loop] calibrator refit failed (non-critical): {exc}")
+
     return events
 
 
