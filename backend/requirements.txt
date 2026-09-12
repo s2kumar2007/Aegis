@@ -15,4 +15,4 @@ shap>=0.40.0
 # Optional GPU / graph deep-learning stack (installed if CUDA base image is used).
 # Left as separate optional file so the baseline (steps 1-4 classifier) always
 # builds even on CPU-only machines.
--r requirements-gnn.txt
+# -r requirements-gnn.txt

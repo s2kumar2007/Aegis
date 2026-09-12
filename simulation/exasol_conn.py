@@ -3,13 +3,14 @@ Shared Exasol connection helper.
 
 Uses pyexasol (pure-Python websocket driver — no ODBC driver needed),
 configured entirely from environment variables so the same code runs
-inside Docker Compose or on a laptop pointed at a local Exasol Personal
-instance.
+inside Docker Compose or on a laptop pointed at a local Exasol Personalinstance.
 """
 import os
 import time
+from dotenv import load_dotenv
 import pyexasol
 
+load_dotenv()
 EXASOL_HOST = os.getenv("EXASOL_HOST", "localhost")
 EXASOL_PORT = os.getenv("EXASOL_PORT", "8563")
 EXASOL_USER = os.getenv("EXASOL_USER", "sys")
@@ -33,6 +34,8 @@ def get_connection(retries: int = 20, delay_seconds: float = 5.0):
                 password=EXASOL_PASSWORD,
                 schema=EXASOL_SCHEMA,
                 compression=True,
+                encryption=True,
+                websocket_sslopt={"cert_reqs": 0},  # skip verification for self-signed cert (local dev only)
             )
             return conn
         except Exception as e:  # noqa: BLE001

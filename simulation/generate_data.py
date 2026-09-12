@@ -214,8 +214,8 @@ def build_dataset(n_normal_accounts=4500, n_normal_txns=50000,
 def load_into_exasol(accounts_df, txns_df, labels_df):
     conn = get_connection()
     print("[generate_data] running schema + view SQL...")
-    for f in ["/app/sql/01_schema.sql", "/app/sql/02_account_velocity_view.sql",
-              "/app/sql/03_ring_trace_view.sql", "/app/sql/04_ring_summary_view.sql"]:
+    for f in ["sql/01_schema.sql", "sql/02_account_velocity_view.sql",
+              "sql/03_ring_trace_view.sql", "sql/04_ring_summary_view.sql"]:
         run_sql_file(conn, f)
 
     print(f"[generate_data] loading {len(accounts_df)} accounts...")

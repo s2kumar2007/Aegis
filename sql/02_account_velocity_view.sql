@@ -1,19 +1,3 @@
--- =====================================================================
--- account_velocity_view
---
--- Purpose: per-account rolling-window transaction behaviour, computed
--- ENTIRELY inside Exasol using analytic window functions. This feeds
--- the baseline classifier directly — the backend SELECTs from this
--- view, it never recomputes these aggregates in pandas.
---
--- Windows:
---   - 1 hour   : burst detection (smurfing / fan-out bursts)
---   - 24 hour  : daily velocity
---   - 30 day   : historical baseline for deviation scoring
--- =====================================================================
-
-OPEN SCHEMA AEGIS;
-
 CREATE OR REPLACE VIEW account_velocity_view AS
 WITH outbound AS (
     SELECT
@@ -22,8 +6,6 @@ WITH outbound AS (
         t.amount,
         t.txn_timestamp,
 
-        -- rolling counts / sums per account over trailing windows,
-        -- expressed as row-range window functions over time order
         COUNT(*) OVER (
             PARTITION BY t.sender_id
             ORDER BY t.txn_timestamp
@@ -60,11 +42,8 @@ WITH outbound AS (
             RANGE BETWEEN INTERVAL '30' DAY PRECEDING AND CURRENT ROW
         )                                              AS stddev_amount_30d,
 
-        -- distinct counterparties in the last hour -> fan-out signal
         COUNT(DISTINCT t.receiver_id) OVER (
-            PARTITION BY t.sender_id
-            ORDER BY t.txn_timestamp
-            RANGE BETWEEN INTERVAL '1' HOUR PRECEDING AND CURRENT ROW
+            PARTITION BY t.sender_id, CAST(TRUNC(t.txn_timestamp, 'HH') AS TIMESTAMP)
         )                                              AS distinct_receivers_1h,
 
         COUNT(*) OVER (
@@ -78,8 +57,7 @@ WITH outbound AS (
             ORDER BY t.txn_timestamp
             RANGE UNBOUNDED PRECEDING
         )                                              AS first_txn_ts,
-        
-        -- NEW FEATURE 1: time since last transaction
+
         SECONDS_BETWEEN(
             t.txn_timestamp,
             LAG(t.txn_timestamp) OVER (
@@ -87,14 +65,7 @@ WITH outbound AS (
                 ORDER BY t.txn_timestamp
             )
         )                                              AS time_since_last_txn,
-        
-        -- NEW FEATURE 2: device/IP reuse count 
-        -- Note: Assumes device_id / ip_address columns are added to transactions
-        COUNT(DISTINCT t.sender_id) OVER (
-            PARTITION BY COALESCE(t.device_id, t.ip_address)
-        )                                              AS device_ip_reuse_count,
 
-        -- NEW FEATURE 4: hour of day and odd hour flag
         EXTRACT(HOUR FROM t.txn_timestamp)             AS txn_hour_of_day,
         CASE
             WHEN EXTRACT(HOUR FROM t.txn_timestamp) BETWEEN 1 AND 5 THEN 1
@@ -112,10 +83,8 @@ inbound AS (
             RANGE BETWEEN INTERVAL '1' HOUR PRECEDING AND CURRENT ROW
         )                                              AS in_txn_count_1h,
         COUNT(DISTINCT t.sender_id) OVER (
-            PARTITION BY t.receiver_id
-            ORDER BY t.txn_timestamp
-            RANGE BETWEEN INTERVAL '1' HOUR PRECEDING AND CURRENT ROW
-        )                                              AS distinct_senders_1h,   -- fan-in signal
+            PARTITION BY t.receiver_id, CAST(TRUNC(t.txn_timestamp, 'HH') AS TIMESTAMP)
+        )                                              AS distinct_senders_1h,
         t.txn_id                                       AS in_txn_id
     FROM transactions t
 )
@@ -130,37 +99,33 @@ SELECT
     o.txn_sum_24h,
     o.avg_amount_30d,
     o.stddev_amount_30d,
-    
-    -- Original deviation score
+
     CASE
         WHEN o.stddev_amount_30d IS NULL OR o.stddev_amount_30d = 0 THEN 0
         ELSE (o.amount - o.avg_amount_30d) / o.stddev_amount_30d
     END                                                AS amount_deviation_score,
-    
-    -- NEW FEATURE 3: amount z-score (alias for standard deviation score)
+
     CASE
         WHEN o.stddev_amount_30d IS NULL OR o.stddev_amount_30d = 0 THEN 0
         ELSE (o.amount - o.avg_amount_30d) / o.stddev_amount_30d
     END                                                AS amount_zscore,
-    
+
     o.distinct_receivers_1h,
     COALESCE(i.in_txn_count_1h, 0)                     AS in_txn_count_1h,
     COALESCE(i.distinct_senders_1h, 0)                 AS distinct_senders_1h,
-    
+
     SECONDS_BETWEEN(o.txn_timestamp, o.first_txn_ts)   AS time_since_first_txn,
     CASE
         WHEN o.avg_amount_30d IS NULL OR o.avg_amount_30d = 0 THEN 0
         ELSE o.amount / o.avg_amount_30d
     END                                                AS amount_vs_running_avg_ratio,
     (o.txn_count_1h - o.txn_count_prior_1h)            AS velocity_acceleration,
-    
-    -- Expose new features
+
     COALESCE(o.time_since_last_txn, 0)                 AS time_since_last_txn,
-    o.device_ip_reuse_count,
     o.txn_hour_of_day,
     o.is_odd_hour
 
 FROM outbound o
 LEFT JOIN inbound i
        ON i.account_id = o.account_id
-      AND i.in_txn_id  = o.txn_id;
+      AND i.in_txn_id  = o.txn_id
