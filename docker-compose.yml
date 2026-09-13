@@ -1,18 +1,57 @@
-version: "3.8"
-
 services:
-  # ------------------------------------------------------------------
-  # FastAPI backend — GPU-enabled for XGBoost / GNN training & scoring.
-  # ------------------------------------------------------------------
+  # ----------------------------------------------------------------
+  # Exasol Community Edition
+  # ----------------------------------------------------------------
+  exasol:
+    image: exasol/docker-db:latest
+    container_name: aegis-exasol
+    privileged: true
+    ports:
+      - "8563:8563"
+    environment:
+      - EXA_DB_PASSWORD=exasol
+    volumes:
+      - exasol_data:/exa
+    networks:
+      - aegis-net
+
+  # ----------------------------------------------------------------
+  # Schema init — runs SQL files once after Exasol is up
+  # ----------------------------------------------------------------
+  db-init:
+    image: python:3.11-slim
+    container_name: aegis-db-init
+    depends_on:
+      - exasol
+    environment:
+      - EXASOL_HOST=exasol
+      - EXASOL_PORT=8563
+      - EXASOL_USER=sys
+      - EXASOL_PASSWORD=exasol
+    volumes:
+      - ./sql:/sql
+      - ./init_db.py:/init_db.py
+    command: bash -c "pip install pyexasol -q && python /init_db.py"
+    networks:
+      - aegis-net
+
+  # ----------------------------------------------------------------
+  # FastAPI backend
+  # ----------------------------------------------------------------
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aegis-backend
-    env_file: .env
+    depends_on:
+      - db-init
     environment:
       - PYTHONUNBUFFERED=1
-      - EXASOL_HOST=host.docker.internal
+      - EXASOL_HOST=exasol
+      - EXASOL_PORT=8563
+      - EXASOL_USER=sys
+      - EXASOL_PASSWORD=exasol
+      - EXASOL_SCHEMA=AEGIS
     ports:
       - "8000:8000"
     volumes:
@@ -20,20 +59,12 @@ services:
       - ./sql:/app/sql
       - ./simulation:/app/simulation
       - ./ml:/app/ml
-    # Uncomment on a machine with NVIDIA Container Toolkit installed:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
     networks:
       - aegis-net
 
-  # ------------------------------------------------------------------
-  # React "War Room" frontend.
-  # ------------------------------------------------------------------
+  # ----------------------------------------------------------------
+  # React frontend (Art Edition)
+  # ----------------------------------------------------------------
   frontend:
     build:
       context: ./frontend
@@ -51,3 +82,6 @@ services:
 networks:
   aegis-net:
     driver: bridge
+
+volumes:
+  exasol_data:

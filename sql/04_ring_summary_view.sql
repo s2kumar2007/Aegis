@@ -1,9 +1,9 @@
 CREATE OR REPLACE VIEW ring_summary_view AS
 WITH ranked AS (
     SELECT
-        *,
+        t.*,
         ROW_NUMBER() OVER (PARTITION BY root_account_id ORDER BY hop_no DESC) AS rn
-    FROM ring_trace_view
+    FROM ring_trace_view t
 )
 SELECT
     root_account_id,
