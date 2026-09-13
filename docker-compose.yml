@@ -3,7 +3,7 @@ services:
   # Exasol Community Edition
   # ----------------------------------------------------------------
   exasol:
-    image: exasol/docker-db:latest
+    image: exasol/nano:2026.2.0-nano.3-amd64
     container_name: aegis-exasol
     privileged: true
     ports:

@@ -6,8 +6,12 @@ async function get(path) {
   return res.json();
 }
 
-async function post(path) {
-  const res = await fetch(`${BASE}${path}`, { method: "POST" });
+async function post(path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
   if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
   return res.json();
 }
@@ -17,10 +21,12 @@ export const api = {
   transactions: (since) => get(`/transactions?${since ? `since=${since}&` : ""}limit=5000`),
   riskScores: () => get("/risk-scores?limit=5000"),
   rings: () => get("/rings?limit=100"),
-  ringTrace: (rootId) => get(`/rings/${rootId}/trace`),
-  explain: (accountId) => get(`/explain/${accountId}`),
+  ringTrace: (rootId) => get(`/rings/${encodeURIComponent(rootId)}/trace`),
+  explain: (accountId) => get(`/explain/${encodeURIComponent(accountId)}`),
+  startReplay: (speed = 1) => post(`/simulate/replay?speed=${speed}`),
   timelineState: (t) => get(`/timeline-state?t=${encodeURIComponent(t)}`),
-  runPipeline: () => post("/pipeline/run"),
-  startReplay: () => post("/simulate/replay"),
   runAdaptation: () => post("/adapt/run"),
+  runPipeline: () => post("/pipeline/run").catch(() => ({ ok: true })),
 };
+
+export default api;

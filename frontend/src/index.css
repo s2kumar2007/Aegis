@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: "Inter", ui-sans-serif, system-ui;
+  background: #0a0c0f;
+  color: #d7dde3;
+}
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #11151a; }
+::-webkit-scrollbar-thumb { background: #2a333d; border-radius: 4px; }
