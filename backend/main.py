@@ -31,7 +31,7 @@ app.add_middleware(
 
 # In-memory replay cursor for the timeline demo (kept simple on purpose —
 # this drives the frontend's time-scrubber, it is not the system of record).
-_replay_state = {"running": False, "cursor_ts": None, "speed": 60}
+_replay_state = {"running": False, "cursor_ts": None, "speed": 1.0}
 
 
 def df_to_records(df: pd.DataFrame):
@@ -130,7 +130,7 @@ def start_replay(speed: int = 60):
     row = conn.execute("SELECT MIN(txn_timestamp) FROM transactions").fetchone()
     conn.close()
     _replay_state["running"] = True
-    _replay_state["cursor_ts"] = row[0].isoformat() if row and row[0] else None
+    _replay_state["cursor_ts"] = str(row[0]) if row and row[0] else None
     _replay_state["speed"] = speed
     return _replay_state
 

@@ -14,7 +14,7 @@ async function post(path) {
 
 export const api = {
   accounts: () => get("/accounts?limit=2000"),
-  transactions: (since) => get(`/transactions${since ? `?since=${since}` : ""}&limit=5000`),
+  transactions: (since) => get(`/transactions?${since ? `since=${since}&` : ""}limit=5000`),
   riskScores: () => get("/risk-scores?limit=5000"),
   rings: () => get("/rings?limit=100"),
   ringTrace: (rootId) => get(`/rings/${rootId}/trace`),
