@@ -1,10 +1,11 @@
 # AEGIS — Deployment & Run Guide
 
-**Project:** Multi-Layer UPI Fraud Detection
+**Adaptive Graph-Based UPI Fraud Detection & Explainable Money-Trail Tracing**
+Track: *Predict, Detect & Optimize*
 **Repo:** https://github.com/s2kumar2007/Aegis
 **Team:** 404 FOUNDERS
 
-This guide covers local deployment on **Windows + WSL2 + Docker Desktop**, the environment AEGIS is built and verified against (the original Azure deployment path is not required and is documented only as background at the end).
+AEGIS detects coordinated multi-account UPI fraud rings (smurfing, layering, mule networks), explains *why* each account was flagged, and traces the full money trail. **Exasol Personal is the active computational core** — rolling-window velocity features and multi-hop path tracing are computed as SQL views inside the database, not recomputed in pandas.
 
 ---
 
@@ -12,163 +13,205 @@ This guide covers local deployment on **Windows + WSL2 + Docker Desktop**, the e
 
 | Requirement | Notes |
 |---|---|
-| Windows 10/11 | with WSL2 enabled |
-| WSL2 (Ubuntu) | `wsl --install -d Ubuntu` if not already set up |
-| Docker Desktop | with **WSL2 integration** enabled for your Ubuntu distro (Settings → Resources → WSL Integration) |
-| Python 3.10+ | inside WSL, for the venv |
-| Node.js + npm | inside WSL, required to build the frontend (see §5) |
-| Git | inside WSL |
-
-Verify Docker is reachable from inside WSL before continuing:
-```bash
-docker ps
-```
-If this fails, fix the WSL↔Docker integration in Docker Desktop settings first — nothing else will work until `docker` resolves inside WSL.
+| Docker + Docker Compose | Required for the app stack |
+| Exasol Personal (Launcher CLI) | The hackathon mandates the **real Exasol Personal edition**, deployed via Exasol's Launcher CLI — **not** a local Docker container |
+| GPU (optional) | NVIDIA Container Toolkit for `gpu_hist` XGBoost / GraphSAGE on CUDA. Both ML modules auto-detect and fall back to CPU, so this is optional for a demo |
 
 ---
 
-## 2. Clone & Python Environment
+## 2. Deploy Exasol Personal
+
+This runs **outside** this repo, via Exasol's own installer:
 
 ```bash
-git clone https://github.com/s2kumar2007/Aegis.git
-cd Aegis
+curl https://downloads.exasol.com/exasol-personal/installer.sh | sh
+mkdir deployment && cd deployment
 
-python3 -m venv venv
-source venv/bin/activate
+# Choose your target: aws, azure, or local (macOS)
+exasol install local
 
-pip install -r requirements.txt
-# Optional, only if you want GNN-based ring scoring:
-pip install -r requirements-gnn.txt
+# Get your connection details
+exasol info
 ```
 
-> The Dockerfile installs a **CPU-only torch wheel** for `requirements-gnn.txt` — GPU is not needed at this data scale.
+You can also connect directly with `exasol connect` to inspect the instance.
 
 ---
 
-## 3. Environment Variables
+## 3. Configure the Repo
 
-Create a `.env` file at the project root (loaded via `load_dotenv()`):
+```bash
+git clone https://github.com/s2kumar2007/Aegis.git aegis
+cd aegis
+
+cp .env.example .env
+```
+
+Edit `.env` and fill in the real values from `exasol info`:
 
 ```env
-EXASOL_HOST=127.0.0.1
-EXASOL_PORT=8563
-EXASOL_USER=sys
-EXASOL_PASSWORD=exasol
-EXASOL_SCHEMA=aegis
-```
-
-**Important Docker-specific override:** inside the `aegis-backend` container, `127.0.0.1` refers to the container itself, not the host running Exasol. `docker-compose.yml` already overrides this for you:
-
-```yaml
-services:
-  aegis-backend:
-    environment:
-      - EXASOL_HOST=host.docker.internal
-```
-
-Only edit this if you rename services or change networking — the default compose file handles it.
-
----
-
-## 4. Start the Stack
-
-```bash
-docker compose up -d --build
-```
-
-This brings up four containers:
-
-| Container | Role |
-|---|---|
-| `aegis-exasol` | Exasol (via `exasol/nano` image), local system of record, `127.0.0.1:8563` |
-| `aegis-db-init` | Runs schema/setup SQL against Exasol on first boot |
-| `aegis-backend` | FastAPI service + ML pipeline |
-| `aegis-frontend` | React "War Room" dashboard, served via nginx |
-
-Check everything is healthy:
-```bash
-docker compose ps
-docker compose logs -f aegis-exasol   # wait for Exasol to report ready
-docker compose logs -f aegis-backend
+EXASOL_HOST=<from exasol info>
+EXASOL_PORT=<from exasol info>
+EXASOL_USER=<from exasol info>
+EXASOL_PASSWORD=<from exasol info>
 ```
 
 ---
 
-## 5. Building the Frontend (manual step — currently required)
-
-`frontend/Dockerfile` expects a **pre-built** `dist/` folder — it does `COPY dist /usr/share/nginx/html` rather than building inside Docker. You must build locally first:
+## 4. One-Command Start
 
 ```bash
-cd frontend
-npm install
-npm run build      # produces frontend/dist/
-cd ..
-
-docker compose up -d --build aegis-frontend
+docker compose up -d
+./run_demo.sh
 ```
 
-If `npm`/`node` aren't available in WSL yet:
-```bash
-sudo apt update
-sudo apt install -y nodejs npm
-# or, for a specific LTS version, use nvm:
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-nvm install --lts
-```
+`run_demo.sh` waits for services to be healthy, then does three things:
 
----
+1. Runs `simulation/generate_data.py` inside the backend container — creates the Exasol schema/views and loads accounts, transactions, and fraud labels (normal traffic + planted smurfing/layering/mule rings).
+2. Calls `POST /pipeline/run` — trains the baseline XGBoost classifier on `account_velocity_view`, scores ring membership via the graph/GNN layer, generates Bayesian explanations, and writes it all to `risk_scores`.
+3. Tells you the UI is ready.
 
-## 6. Run the ML Pipeline
-
-Once the stack is up and the frontend is built:
-
-```bash
-docker exec -it aegis-backend python ml/pipeline.py
-```
-
-Expected: the pipeline trains the XGBoost classifier, runs the graph-based ring scorer, trains the autoencoder, computes SHAP explanations, and writes rows (≈4,700 in the reference run) into the `risk_scores` table in Exasol.
-
----
-
-## 7. Verify the API
-
-```bash
-curl http://localhost:8000/risk-scores
-```
-Should return well-formed JSON with fraud-risk scores and explanations per transaction.
-
-Open the dashboard at:
+Open the War Room UI:
 ```
 http://localhost:3000
 ```
-(or whatever port `aegis-frontend` is mapped to in `docker-compose.yml`)
 
 ---
 
-## 8. Common Issues & Fixes
+## 5. Re-Running Things Manually
 
-These are the real issues hit while standing this project up — check here first if something breaks.
+Re-run just the scoring pipeline (e.g. after the adaptive-loop demo adds new transactions):
+```bash
+curl -X POST http://localhost:8000/pipeline/run
+```
+
+Trigger the adaptive-loop stretch demo (rings mutate to smaller/slower transactions; the system logs a threshold adjustment):
+```bash
+curl -X POST http://localhost:8000/adapt/run
+```
+
+Re-apply a changed SQL view under `/sql` **without** re-seeding data:
+```bash
+docker exec -it aegis-backend python -c \
+  "import sys; sys.path.append('/app/simulation'); from exasol_conn import get_connection, run_sql_file; \
+   c = get_connection(); run_sql_file(c, '/app/sql/03_ring_trace_view.sql'); c.close()"
+```
+
+---
+
+## 6. API Reference
+
+| Endpoint | Description |
+|---|---|
+| `GET /accounts` | All simulated accounts |
+| `GET /transactions?since=` | Transactions, optionally from a timestamp |
+| `GET /risk-scores` | Per-account model + ring scores + explanation |
+| `GET /rings` | Ring candidates from `ring_summary_view` |
+| `GET /rings/{root_account_id}/trace` | Full hop-by-hop path (from `ring_trace_view`) |
+| `GET /explain/{account_id}` | Bayesian plain-language explanation for one account |
+| `POST /simulate/replay` | Resets the server-side replay cursor |
+| `GET /timeline-state?t=` | Network snapshot as of simulated time `t` |
+| `POST /pipeline/run` | Re-run baseline + graph + Bayesian scoring |
+| `POST /adapt/run` | Run the adaptive-loop stretch scenario |
+
+Sanity check:
+```bash
+curl http://localhost:8000/risk-scores
+```
+
+---
+
+## 7. Why Exasol Is the Core, Not Just Storage
+
+- **`account_velocity_view`** (`/sql/02_account_velocity_view.sql`) computes rolling 1h/24h/30d transaction counts, sums, averages, standard deviations, and z-score-style amount deviation — all via Exasol analytic window functions (`RANGE BETWEEN ... PRECEDING`). The backend `SELECT`s this view directly; these numbers are never recomputed in pandas.
+- **`ring_trace_view`** (`/sql/03_ring_trace_view.sql`) is a **recursive CTE** that walks the transaction graph up to 5 hops forward in time, with cycle guards, entirely in SQL — this is how layering/mule chains are traced. This is the top-weighted piece of the hackathon brief.
+- **`ring_summary_view`** aggregates those traces into ring candidates for the API and the UI's case-file panel.
+
+---
+
+## 8. Architecture
+
+```
+Data Simulation (generate_data.py)
+        |  normal txns + planted rings
+        v
+Exasol Personal (computational core)
+  accounts / transactions / fraud_labels
+        |
+        +--> account_velocity_view (rolling window SQL) --> baseline_classifier.py (GPU XGBoost)
+        +--> ring_trace_view (recursive CTE, depth <= 5) --> ring_summary_view
+        +--> transactions --> gnn_ring_scorer.py (networkx + GPU GraphSAGE)
+        +--> account_velocity_view --> explainability.py (pgmpy Bayesian network)
+                                                |
+                            fraud_labels --> adaptive_loop.py --> adaptation_log
+                                                |
+                        risk_scores + ring_summary_view
+                                                v
+                              FastAPI backend (/accounts, /transactions,
+                              /risk-scores, /rings, /explain/{id},
+                              /simulate/replay, /timeline-state)
+                                                v
+                        React War Room (force-directed graph,
+                              case file panel, time scrubber)
+```
+
+---
+
+## 9. Build Order This Repo Follows
+
+Each stage is additive — if you stop after step 4, `/risk-scores` still returns real, working baseline scores; the UI degrades gracefully (0 for `ring_membership_score`, generic explanation) rather than crashing.
+
+1. **Infrastructure** — `docker-compose.yml`, one-command startup.
+2. **Data simulation** — `simulation/generate_data.py`.
+3. **Exasol SQL layer** — `sql/02_account_velocity_view.sql`, `sql/03_ring_trace_view.sql` (top-weighted piece).
+4. **Detection: baseline** — `ml/baseline_classifier.py` (GPU XGBoost, CPU fallback). Always works.
+5. **Detection: graph/GNN** — `ml/gnn_ring_scorer.py`. Falls back to a networkx-only heuristic score if `torch_geometric` isn't installed.
+6. **Explainability** — `ml/explainability.py` (pgmpy Bayesian network).
+7. **Adaptive loop (stretch)** — `ml/adaptive_loop.py`.
+8. **Backend API** — `backend/main.py`.
+9. **Frontend War Room** — `frontend/src/App.jsx`.
+
+---
+
+## 10. Repo Layout
+
+```
+/simulation   synthetic UPI data generator + Exasol connection helper
+/sql          schema + the two mandatory Exasol views + ring summary view
+/backend      FastAPI service (reads Exasol, exposes REST API)
+/ml           baseline XGBoost, graph/GNN ring scorer, Bayesian explainability,
+              adaptive loop, and the pipeline orchestrator that ties them together
+/frontend     React "War Room" UI (force graph, case files, time scrubber)
+```
+
+---
+
+## 11. Cloud Deployment Notes
+
+Exasol Personal Edition is deployed via the Launcher CLI (`exasol install aws` / `exasol install azure`) — **not** via docker-compose.
+
+- **Production scale**: for genuine production workloads, Exasol offers managed deployments (Exasol SaaS / cloud marketplaces) sized for multi-node clusters. Swap the `EXASOL_HOST`/port/credentials env vars to point the backend at that cluster — no application code changes needed, since all access goes through `pyexasol` using standard connection parameters.
+- **Secrets**: put `EXASOL_PASSWORD` etc. in a secrets manager (AWS Secrets Manager / Azure Key Vault), not in `.env`, for anything beyond local demo use.
+- **Statelessness**: the FastAPI backend is stateless aside from a small in-memory replay cursor — safe to run multiple replicas behind a load balancer; Exasol remains the single source of truth.
+- **GPU**: `gpu_hist` XGBoost and GraphSAGE on CUDA need a GPU-backed instance (AWS `g4dn`/`g5`, Azure `NC`-series) with the NVIDIA Container Toolkit. Optional — both ML modules fall back to CPU automatically.
+
+---
+
+## 12. Troubleshooting (issues hit while building this)
 
 | Symptom | Fix |
 |---|---|
-| `SSL: CERTIFICATE_VERIFY_FAILED` connecting to Exasol | Ensure `pyexasol.connect()` is called with `encryption=True, websocket_sslopt={"cert_reqs": 0}` |
+| `SSL: CERTIFICATE_VERIFY_FAILED` connecting to Exasol | `pyexasol.connect()` needs `encryption=True, websocket_sslopt={"cert_reqs": 0}` |
 | `.env` values not picked up | Confirm `load_dotenv()` runs before any Exasol connection code |
-| Local (non-Docker) script fails on file paths | `generate_data.py` uses relative `sql/...` paths, not `/app/sql/...` — run it from the project root |
-| Backend can't reach Exasol inside Docker | `EXASOL_HOST` must be `host.docker.internal` inside containers, not `127.0.0.1` |
-| GNN import errors on build | Make sure `requirements-gnn.txt` is copied in the Dockerfile and CPU-only torch wheel is used |
 | `ImportError: DiscreteBayesianNetwork` | `pgmpy==0.1.25` renamed this class — import `BayesianNetwork as DiscreteBayesianNetwork` |
-| `export_to_pandas` fails with cert/TLS error | Upgrade to `pyexasol>=1.0.0` (older versions don't support Exasol's newer ETL TLS requirement) |
-| pyexasol crashes on version string `2026.2.0-nano.3` | Known non-PEP440 version from `exasol/nano`; a monkey-patch on `ExaConnection.exasol_db_version` fixes it (already applied in this repo) |
-| Columns come back as `ACCOUNT_ID` instead of `account_id` | Exasol returns uppercase columns by default; `export_to_pandas` is patched to lowercase them globally |
-| A whole table silently missing after schema setup | `run_sql_file()`'s statement splitter used to drop any statement starting with a `--` comment line — strip comment-only lines before splitting on `;` |
-| `KeyError: device_ip_reuse_count` | Column never existed — already removed from `FEATURE_COLS` |
-| Autoencoder write fails on `risk_scores` insert | Table needs a 6th column, `anomaly_score DOUBLE` |
-| Bind parameters (`:param_name`) fail in `EXPORT` statements | Exasol's `EXPORT` doesn't support host/bind params — use quote-escaped f-string interpolation instead (already applied in `backend/main.py`) |
-| Frontend hits `/transactions&limit=5000` (missing `?`) | Fixed upstream — pull latest `frontend/` code |
+| `export_to_pandas` fails with cert/TLS error | Upgrade to `pyexasol>=1.0.0` |
+| Columns come back as `ACCOUNT_ID` instead of `account_id` | Exasol returns uppercase columns by default — lowercase them on read |
+| A whole table/view silently missing after schema setup | Check `run_sql_file()`'s statement splitter isn't dropping statements that start with a `--` comment line |
+| Bind parameters (`:param_name`) fail in `EXPORT` statements | Exasol's `EXPORT` doesn't support host/bind params — use quote-escaped f-string interpolation |
 
-### Exasol SQL dialect notes (if writing new queries)
-- No `WITH RECURSIVE` — use `CONNECT BY` / `START WITH` / `CONNECT_BY_ROOT` / `SYS_CONNECT_BY_PATH` for multi-hop ring tracing.
-- `PATH` is reserved — use `route` instead.
+### Exasol SQL dialect notes (if writing new views)
+- `ring_trace_view` uses a recursive CTE; if you hit limits on multi-hop tracing, `CONNECT BY` / `START WITH` / `CONNECT_BY_ROOT` / `SYS_CONNECT_BY_PATH` is the fallback hierarchical syntax.
+- `PATH` is a reserved keyword — use `route` instead.
 - `CONNECT BY` can't mix an equality `PRIOR` condition with a non-equal comparison in the same clause.
 - Filters on `LEVEL`-derived columns must sit in an outer wrapping subquery, not inline after `CONNECT BY`.
 - No `LIMIT`/`FETCH FIRST` inside a correlated subquery — use `ROW_NUMBER() OVER (...)` + `MAX(CASE WHEN rn = 1 THEN ... END)`.
@@ -176,15 +219,9 @@ These are the real issues hit while standing this project up — check here firs
 
 ---
 
-## 9. Shutting Down / Resetting
+## 13. Shutting Down / Resetting
 
 ```bash
 docker compose down            # stop containers, keep data
-docker compose down -v         # stop containers and wipe Exasol volume (full reset)
+docker compose down -v         # stop containers and wipe local volumes (full reset)
 ```
-
----
-
-## 10. Background: Deployment Path
-
-Cloud deployment on Azure was attempted first but blocked by `--location` config errors and `Standard_D4s_v3` SKU capacity failures in two regions (Central India, East US) — consistent with a subscription-level quota block. The project pivoted to the local WSL2 + Docker Desktop path described above using Exasol Personal's official starter-kit installer, which is the supported path for this repo going forward.
